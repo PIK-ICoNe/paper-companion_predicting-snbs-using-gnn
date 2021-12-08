@@ -100,6 +100,7 @@ def eval(model, data_loader, tol):
     N = data_loader.dataset[0].x.shape[0]
     loss = 0.
     correct = 0
+    all_labels = torch.Tensor(0).to(device)
     for batch in data_loader:
         batch.to(device)
         labels = batch.y
@@ -107,7 +108,8 @@ def eval(model, data_loader, tol):
         temp_loss = criterion(output, labels)
         loss += temp_loss.item()
         correct += get_prediction(output, labels, tol)
-    accuracy = 100 * correct / (N*batch.num_graphs*len(data_loader))
+        all_labels = torch.cat([all_labels, labels])
+    accuracy = 100 * correct / (all_labels.shape[0])
     print(f"Test loss: {loss/len(data_loader):.3f}.. "
           f"Test accuracy: {accuracy:.3f} %"
           )
@@ -130,18 +132,20 @@ def compute_R2(model, data_loader):
     model.eval()
     torch.no_grad()
     mse_trained = 0
-    all_labels = []
+    all_labels = torch.Tensor(0).to(device)
     for batch in data_loader:
         batch.to(device)
         labels = batch.y
         output = model(batch)
         mse_trained += torch.sum((output - labels) ** 2)
-        all_labels.append(labels)
-    mean_labels = torch.mean(all_labels[0])
-    output_mean = mean_labels * torch.ones(all_labels[0].shape[0], 1)
-    mse_mean = torch.sum((output_mean-all_labels[0])**2)
+        all_labels = torch.cat([all_labels, labels])
+    mean_labels = torch.mean(all_labels)
+    print(all_labels.shape)
+    array_ones = torch.ones(all_labels.shape[0], 1)
+    array_ones = array_ones.to(device)
+    output_mean = mean_labels * array_ones
+    mse_mean = torch.sum((output_mean-all_labels)**2)
     return (1 - mse_trained/mse_mean).item()
-
 
 model.to(device)
 model.double()
