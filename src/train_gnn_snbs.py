@@ -62,6 +62,8 @@ model = initialize_model(cfg["model"])
 
 if cfg["criterion"] == "MSELoss":
     criterion = nn.MSELoss()
+criterion.to(device)
+
 if cfg["optim::optimizer"] == "SGD":
     optimizer = optim.SGD(model.parameters(),
                           lr=cfg["optim::LR"], momentum=cfg["optim::momentum"])
@@ -78,9 +80,9 @@ test_loader = DataLoader(
 
 def train_epoch(model, data_loader):
     loss = 0.0
+    model.train()
     for iter, (batch) in enumerate(data_loader):
         batch.to(device)
-        model.train()
         optimizer.zero_grad()
         outputs = model.forward(batch)
         labels = batch.y
@@ -96,24 +98,32 @@ def train_epoch(model, data_loader):
 
 def eval(model, data_loader, tol):
     model.eval()
-    torch.no_grad()
-    N = data_loader.dataset[0].x.shape[0]
-    loss = 0.
-    correct = 0
-    all_labels = torch.Tensor(0).to(device)
-    for batch in data_loader:
-        batch.to(device)
-        labels = batch.y
-        output = model(batch)
-        temp_loss = criterion(output, labels)
-        loss += temp_loss.item()
-        correct += get_prediction(output, labels, tol)
-        all_labels = torch.cat([all_labels, labels])
+    with torch.no_grad():
+        N = data_loader.dataset[0].x.shape[0]
+        loss = 0.
+        correct = 0
+        all_labels = torch.Tensor(0).to(device)
+        mse_trained = 0.
+        for batch in data_loader:
+            batch.to(device)
+            labels = batch.y
+            output = model(batch)
+            mse_trained += torch.sum((output - labels) ** 2)
+            temp_loss = criterion(output, labels)
+            loss += temp_loss.item()
+            correct += get_prediction(output, labels, tol)
+            all_labels = torch.cat([all_labels, labels])
     accuracy = 100 * correct / (all_labels.shape[0])
     print(f"Test loss: {loss/len(data_loader):.3f}.. "
           f"Test accuracy: {accuracy:.3f} %"
           )
-    return loss, accuracy
+    mean_labels = torch.mean(all_labels)
+    array_ones = torch.ones(all_labels.shape[0], 1)
+    array_ones = array_ones.to(device)
+    output_mean = mean_labels * array_ones
+    mse_mean = torch.sum((output_mean-all_labels)**2)
+    R2 = (1 - mse_trained/mse_mean).item()
+    return loss, accuracy, R2
 
 
 def get_prediction(output, label, tol):
@@ -127,26 +137,6 @@ def get_prediction(output, label, tol):
     return count
 
 
-def compute_R2(model, data_loader):
-    # R**2 = 1 - mse(y,t) / mse(t_mean,t)
-    model.eval()
-    torch.no_grad()
-    mse_trained = 0
-    all_labels = torch.Tensor(0).to(device)
-    for batch in data_loader:
-        batch.to(device)
-        labels = batch.y
-        output = model(batch)
-        mse_trained += torch.sum((output - labels) ** 2)
-        all_labels = torch.cat([all_labels, labels])
-    mean_labels = torch.mean(all_labels)
-    print(all_labels.shape)
-    array_ones = torch.ones(all_labels.shape[0], 1)
-    array_ones = array_ones.to(device)
-    output_mean = mean_labels * array_ones
-    mse_mean = torch.sum((output_mean-all_labels)**2)
-    return (1 - mse_trained/mse_mean).item()
-
 model.to(device)
 model.double()
 
@@ -159,11 +149,10 @@ for epoch in range(epochs):
     print(f"Epoch {epoch+1}/{epochs}.. ")
     temp_loss = train_epoch(model, train_loader)
     train_loss.append(temp_loss)
-    temp_test_loss, test_accu = eval(
+    temp_test_loss, test_accu, R2 = eval(
         model, test_loader, cfg["eval::threshold"])
     test_loss.append(temp_test_loss)
     test_accuracy.append(test_accu)
-    R2 = compute_R2(model, test_loader)
     if len(R2_score) > 1:
         if R2 > max(R2_score):
             torch.save(model.state_dict(), cfg["cfg_path"] + "best_model.pt")
