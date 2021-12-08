@@ -38,6 +38,8 @@ class gnn_snbs(gDataset):
         self.path = grid_path
         self.num_digits = '0' + str(digits.__str__().__len__())
         self.num_classes = 1
+        self.data = {}
+        self.read_in_all_data()
 
     def __len__(self):
         return self.data_len
@@ -46,23 +48,19 @@ class gnn_snbs(gDataset):
         return self.num_classes
 
     def __get_input__(self, index):
-        if index + 1 > self.data_len:
-            print('Error in dataset: Trying to access invalid element')
-        else:
-            id = format(index+self.start_index, self.num_digits)
-            file_to_read = str(self.path)+'/grid_data_'+str(id) + '.h5'
-            hf = h5py.File(file_to_read, 'r')
-            # read in sources/sinks
-            dataset_P = hf.get('P')
-            P = np.array(dataset_P)
-            # read in edge_index
-            dataset_edge_index = hf.get('edge_index')
-            edge_index = np.array(dataset_edge_index)-1
-            # read in edge_attr
-            dataset_edge_attr = hf.get('edge_attr')
-            edge_attr = np.array(dataset_edge_attr)
-
-            hf.close()
+        index_id = format(index, self.num_digits)
+        file_to_read = str(self.path)+'/grid_data_'+str(index_id) + '.h5'
+        hf = h5py.File(file_to_read, 'r')
+        # read in sources/sinks
+        dataset_P = hf.get('P')
+        P = np.array(dataset_P)
+        # read in edge_index
+        dataset_edge_index = hf.get('edge_index')
+        edge_index = np.array(dataset_edge_index)-1
+        # read in edge_attr
+        dataset_edge_attr = hf.get('edge_attr')
+        edge_attr = np.array(dataset_edge_attr)
+        hf.close()
         return torch.tensor(P).unsqueeze(0).transpose(0, 1), torch.tensor(edge_index).transpose(1, 0), torch.tensor(edge_attr)
 
     def __get_P__(self, index):
@@ -78,19 +76,26 @@ class gnn_snbs(gDataset):
         return edge_attr
 
     def __get_label__(self, index):
-        id = format(index+self.start_index, self.num_digits)
-        file_to_read = str(self.path)+'/snbs_'+str(id) + '.h5'
+        index_id = format(index, self.num_digits)
+        file_to_read = str(self.path)+'/snbs_'+str(index_id) + '.h5'
         hf = h5py.File(file_to_read, 'r')
         dataset_snbs = hf.get('snbs')
         snbs = np.array(dataset_snbs)
         hf.close()
         return torch.tensor(snbs).unsqueeze(1)
 
-    def __getitem__(self, index):
+    def read_in_all_data(self):
+        for i in range(self.start_index, self.start_index + self.data_len):
+            self.data[i] = self.__getitem_from_disk__(i)
+
+    def __getitem_from_disk__(self, index):
         x, edge_index, edge_attr = self.__get_input__(index)
         y = self.__get_label__(index)
         data = gData(x=x, edge_index=edge_index, edge_attr=edge_attr, y=y)
         return data
+
+    def __getitem__(self, index):
+        return self.data[index+self.start_index]
 
 
 class GCNNet01(torch.nn.Module):
